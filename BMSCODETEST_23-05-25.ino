@@ -164,6 +164,9 @@ void csFault_check(void);
 void charging(void);
 void lvData(void);
 void canSend(void);
+bool voltage_faultCheck();
+bool temperature_faultCheck();
+bool tfcsFault_check();
 /* ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
 //MCP_CAN CAN(CCS); // CAN object for MCP2515
 mcp2518fd CAN(CCS);  // CAN object for MCP2518FD
@@ -198,8 +201,6 @@ void loop() {
   int cartId = digitalRead(cartId);
   int chargerAux = digitalRead(chargerAux);
   if (millis() - next_loopTime >= MEASUREMENT_LOOP_TIME) {
-  bool voltageFault = voltage_faultCheck();
-  bool tempFault = temperature_faultCheck();
     measurementLoop();
     BMSData();
     if (cartId == 1) {
@@ -211,8 +212,17 @@ void loop() {
     }
     mainLoopCounter += 1;
     if (mainLoopCounter >= 10) {
-      faultCheck();
-      csFault_check();
+      bool voltageFault = voltage_faultCheck();
+      bool tempFault = temperature_faultCheck();
+      bool csFault = tfcsFault_check();
+      if(voltageFault == true || tempFault == true || csFault == true){
+        digitalWrite(AMS_FAULT_SDC, LOW);
+      }
+      else {
+        digitalWrite(AMS_FAULT_SDC, HIGH);
+      }
+      //faultCheck();
+      //csFault_check();
       Serial.println("----------------------------------------------------------------------------------------------------------------------------------------------------------");
       AvgBMSData();
       minmaxCV();
@@ -441,12 +451,11 @@ void faultCounter(uint16_t value, bool isTemp, uint8_t ic, uint8_t cellno) {
       temps_faultCounter[ic][cellno] = 0;
     }
     if (value > 65000) {
-      digitalWrite(AMS_FAULT_SDC, LOW);   // AMS FAULT PIN on CART
+      digitalWrite(AMS_FAULT_SDC, LOW);  // AMS FAULT PIN on CART
       //digitalWrite(AMS_FAULT_PIN, HIGH);  // AMS FAULT PIN on CAR
       digitalWrite(progLED2, HIGH);
       Serial.println("NTC DISCONNECTED");
     }
-    
   }
 }
 
@@ -475,13 +484,14 @@ bool voltage_faultCheck() {
   for (uint8_t currentIc = 0; currentIc < TOTAL_IC; currentIc++) {
     for (uint8_t cell = 0; cell < TOTAL_CELL; cell++) {
       if (volt_faultCounter[currentIc][cell] == 10) {
-          voltfaultStatus[currentIc][cell] = true;
-          volt_faultCounter[currentIc][cell] = 0;
-          return true;
-      }
-      else {
-          voltfaultStatus[currentIc][cell] = false;
-          return false;
+        voltfaultStatus[currentIc][cell] = true;
+        volt_faultCounter[currentIc][cell] = 0;
+        digitalWrite(progLED1, HIGH);
+        return true;
+      } else {
+        voltfaultStatus[currentIc][cell] = false;
+        digitalWrite(progLED1, LOW);
+        return false;
       }
     }
   }
@@ -491,13 +501,14 @@ bool temperature_faultCheck() {
   for (uint8_t currentIc = 0; currentIc < TOTAL_IC; currentIc++) {
     for (uint8_t temp = 0; temp < TEMPS; temp++) {
       if (volt_faultCounter[currentIc][temp] == 10) {
-          voltfaultStatus[currentIc][temp] = true;
-          volt_faultCounter[currentIc][temp] = 0;
-          return true;
-      }
-      else {
-          voltfaultStatus[currentIc][temp] = false;
-          return false;
+        voltfaultStatus[currentIc][temp] = true;
+        volt_faultCounter[currentIc][temp] = 0;
+        digitalWrite(progLED2, HIGH);
+        return true;
+      } else {
+        voltfaultStatus[currentIc][temp] = false;
+        digitalWrite(progLED2, HIGH);
+        return false;
       }
     }
   }
@@ -508,12 +519,12 @@ void faultCheck() {
   for (uint8_t currentIc = 0; currentIc < TOTAL_IC; currentIc++) {
     for (uint8_t cell = 0; cell < TOTAL_CELL; cell++) {
       if (cell < TEMPS) {
-        if ((temps_faultCounter[currentIc][cell] == 10 || volt_faultCounter[currentIc][cell] == 10) ) {
+        if ((temps_faultCounter[currentIc][cell] == 10 || volt_faultCounter[currentIc][cell] == 10)) {
           tempfaultStatus[currentIc][cell] = true;
           temps_faultCounter[currentIc][cell] = 0;
           voltfaultStatus[currentIc][cell] = true;
           volt_faultCounter[currentIc][cell] = 0;
-          digitalWrite(AMS_FAULT_SDC, LOW);   // AMS FAULT PIN on CART
+          digitalWrite(AMS_FAULT_SDC, LOW);  // AMS FAULT PIN on CART
           //digitalWrite(AMS_FAULT_PIN, HIGH);  // AMS FAULT PIN on CAR
           digitalWrite(progLED2, HIGH);
           digitalWrite(progLED1, HIGH);
@@ -529,10 +540,10 @@ void faultCheck() {
         if (volt_faultCounter[currentIc][cell] >= 10) {
           voltfaultStatus[currentIc][cell] = true;
           volt_faultCounter[currentIc][cell] = 0;
-          digitalWrite(AMS_FAULT_SDC, LOW);   // AMS FAULT PIN on CART
+          digitalWrite(AMS_FAULT_SDC, LOW);  // AMS FAULT PIN on CART
           //digitalWrite(AMS_FAULT_PIN, HIGH);  // AMS FAULT PIN on CAR
           digitalWrite(progLED1, HIGH);
-          
+
         } else {
           voltfaultStatus[currentIc][cell] = false;
           digitalWrite(AMS_FAULT_SDC, HIGH);  // AMS FAULT PIN on CART
@@ -691,6 +702,23 @@ void SoC() {
     Serial.println("----------------------------------------------------------------------------------------------------------------------------------------------------------");
     // Update start time
     start_timer = current_time;
+  }
+}
+
+bool tfcsFault_check() {
+  currentSensor = readCurrent();
+  Serial.print("Current sensor value:");
+  Serial.print(currentSensor);
+  Serial.print(" Amps.");
+  Serial.println();
+  if (currentSensor > csFault_value || currentSensor < -400) {
+    digitalWrite(progLED3, HIGH);
+    Serial.println("Current sensor fault");
+    Serial.println("----------------------------------------------------------------------------------------------------------------------------------------------------------");
+    return true;
+  } else {
+    digitalWrite(progLED3, LOW);
+    return false;
   }
 }
 
